@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<title>DomarDashboard – Intervall & Statistik</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="bg-gray-100 p-6">
+
+<h1 class="text-3xl font-bold mb-6">DomarDashboard – Intervall & Statistik</h1>
+
+<!-- LOADING BAR -->
+<div id="loadingBar" class="hidden mb-4">
+  <div class="w-full bg-gray-300 rounded h-4">
+    <div id="loadingProgress" class="bg-blue-500 h-4 rounded w-0 transition-all"></div>
+  </div>
+  <p id="loadingText" class="text-sm text-gray-600 mt-1">Hämtar data…</p>
+</div>
+
+<!-- FILTER CARD -->
+<div class="bg-white shadow p-4 rounded mb-6">
+  <div class="flex items-center gap-4">
+    <div>
+      <label class="block text-sm">Från:</label>
+      <input id="dateFrom" type="date" class="border rounded px-2 py-1">
+    </div>
+
+    <div>
+      <label class="block text-sm">Till:</label>
+      <input id="dateTo" type="date" class="border rounded px-2 py-1">
+    </div>
+
+    <button onclick="loadInterval()"
+      class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 mt-5">
+      Ladda
+    </button>
+  </div>
+</div>
+
+<!-- SELECTORS -->
+<div class="bg-white shadow p-4 rounded mb-6 flex items-center gap-8">
+  <div>
+    <label class="block">Serie:</label>
+    <select id="seriesSelect" onchange="renderSeriesStats()" class="border rounded px-2 py-1 w-64">
+      <option value="">– välj serie –</option>
+    </select>
+  </div>
+
+  <div>
+    <label class="block">Domare:</label>
+    <select id="refSelect" onchange="renderRefereeStats()" class="border rounded px-2 py-1 w-64">
+      <option value="">– välj domare –</option>
+    </select>
+  </div>
+</div>
+
+<!-- OUTPUT AREAS -->
+<div id="seriesOutput" class="mb-6"></div>
+<div id="refOutput"></div>
+
+
+<script>
+let allMatches = [];
+let allSeries = new Set();
+let allRefs = new Set();
+
+// ROLE MAPPING
+function mapRole(desc) {
+  if (!desc) return "Other";
+  let d = desc.toLowerCase().trim();
+
+  if (d.includes("förstedomare")) return "D1";
+  if (d.includes("andredomare")) return "D2";
+  if (d.includes("tredjedomare")) return "D3";
+  if (d.includes("fjärdedomare")) return "D4";
+  if (d.includes("ass. domare 1") || d.includes("ass.domare 1")) return "AD1";
+  if (d.includes("ass. domare 2") || d.includes("ass.domare 2")) return "AD2";
+  if (d === "domare") return "HD";
+
+  return "Other";
+}
+
+// FETCH ONE DAY
+async function fetchDay(date) {
+  const target =
+    `https://www.gbgfotboll.se/api/matches-today/games/?showReferees=true&associationId=7&date=${date}`;
+  const url = "https://corsproxy.io/?" + encodeURIComponent(target);
+  const res = await fetch(url);
+  if (!res.ok) return null;
+  return res.json();
+}
+
+// LOAD INTERVAL
+async function loadInterval() {
+  const from = document.getElementById("dateFrom").value;
+  const to = document.getElementById("dateTo").value;
+
+  if (!from || !to) return alert("Välj datumintervall!");
+
+  allMatches = [];
+  allSeries.clear();
+  allRefs.clear();
+
+  const loading = document.getElementById("loadingBar");
+  const progress = document.getElementById("loadingProgress");
+  const text = document.getElementById("loadingText");
+
+  loading.classList.remove("hidden");
+
+  let current = new Date(from);
+  const end = new Date(to);
+
+  const totalDays = (end - current) / (1000*60*60*24) + 1;
+  let dayCount = 0;
+
+  while (current <= end) {
+    const d = current.toISOString().slice(0,10);
+    text.textContent = `Hämtar ${d} …`;
+
+    const data = await fetchDay(d);
+    dayCount++;
+
+    progress.style.width = ((dayCount / totalDays) * 100) + "%";
+
+    if (data) {
+      for (const comp of data.competitions) {
+        allSeries.add(comp.name);
+
+        for (const g of comp.games) {
+          allMatches.push({
+            serie: comp.name,
+            date: g.dateFormatted,
+            hall: g.location,
+            home: g.homeTeam.name,
+            away: g.awayTeam.name,
+            referees: g.referees
+          });
+
+          for (const r of g.referees)
+            allRefs.add(r.name);
+        }
+      }
+    }
+    current.setDate(current.getDate() + 1);
+  }
+
+  loading.classList.add("hidden");
+  populateDropdowns();
+}
+
+// Populate dropdowns
+function populateDropdowns() {
+  const s = document.getElementById("seriesSelect");
+  const r = document.getElementById("refSelect");
+
+  s.innerHTML = '<option value="">– välj serie –</option>';
+  r.innerHTML = '<option value="">– välj domare –</option>';
+
+  for (const serie of [...allSeries].sort())
+    s.innerHTML += `<option>${serie}</option>`;
+
+  for (const ref of [...allRefs].sort())
+    r.innerHTML += `<option>${ref}</option>`;
+}
+
+// SERIES STATISTICS
+function renderSeriesStats() {
+  const serie = document.getElementById("seriesSelect").value;
+  const box = document.getElementById("seriesOutput");
+  box.innerHTML = "";
+  if (!serie) return;
+
+  const matches = allMatches.filter(m => m.serie === serie);
+  let stats = {};
+
+  for (const m of matches) {
+    for (const r of m.referees) {
+      const role = mapRole(r.roleDescription);
+
+      if (!stats[r.name])
+        stats[r.name] = {HD:0,D1:0,D2:0,AD1:0,AD2:0,D3:0,D4:0,total:0};
+
+      stats[r.name][role]++;
+      stats[r.name].total++;
+    }
+  }
+
+  let html = `
+    <div class="bg-white shadow p-4 rounded">
+      <h2 class="text-xl font-bold mb-4">Statistik – ${serie}</h2>
+      <table class="w-full text-sm">
+        <tr class="bg-gray-200">
+          <th class="p-2">Domare</th><th class="p-2">HD</th><th class="p-2">D1</th>
+          <th class="p-2">D2</th><th class="p-2">AD1</th><th class="p-2">AD2</th>
+          <th class="p-2">D3</th><th class="p-2">D4</th><th class="p-2">Totalt</th>
+        </tr>
+  `;
+
+  for (const [name, s] of Object.entries(stats)) {
+    html += `
+      <tr class="border-b">
+        <td class="p-2">${name}</td>
+        <td class="p-2">${s.HD}</td><td class="p-2">${s.D1}</td>
+        <td class="p-2">${s.D2}</td><td class="p-2">${s.AD1}</td>
+        <td class="p-2">${s.AD2}</td><td class="p-2">${s.D3}</td>
+        <td class="p-2">${s.D4}</td>
+        <td class="p-2 font-bold">${s.total}</td>
+      </tr>
+    `;
+  }
+
+  html += "</table></div>";
+  box.innerHTML = html;
+}
+
+
+// REFEREE STATS + KOLLEGOR
+function renderRefereeStats() {
+  const name = document.getElementById("refSelect").value;
+  const box = document.getElementById("refOutput");
+  box.innerHTML = "";
+  if (!name) return;
+
+  const matches = allMatches.filter(m =>
+    m.referees.some(r => r.name === name)
+  );
+
+  let s = {HD:0,D1:0,D2:0,AD1:0,AD2:0,D3:0,D4:0,total:0};
+  let colleagues = {};
+
+  for (const m of matches) {
+    for (const r of m.referees) {
+      if (r.name === name) {
+        const role = mapRole(r.roleDescription);
+        s[role]++;
+        s.total++;
+      } else {
+        colleagues[r.name] = (colleagues[r.name] || 0) + 1;
+      }
+    }
+  }
+
+  let html = `
+    <div class="bg-white shadow p-4 rounded">
+      <h2 class="text-xl font-bold mb-4">${name}</h2>
+
+      <p class="mb-4">
+        HD: ${s.HD} &nbsp;
+        D1: ${s.D1} &nbsp;
+        D2: ${s.D2} &nbsp;
+        AD1: ${s.AD1} &nbsp;
+        AD2: ${s.AD2} &nbsp;
+        D3: ${s.D3} &nbsp;
+        D4: ${s.D4} &nbsp;
+        <b>Totalt: ${s.total}</b>
+      </p>
+
+      <h3 class="text-lg font-bold mt-4 mb-2">Domarkollegor</h3>
+      <table class="w-full text-sm mb-6">
+        <tr class="bg-gray-200">
+          <th class="p-2">Kollega</th>
+          <th class="p-2">Matcher ihop</th>
+        </tr>
+  `;
+
+  for (const [c, count] of Object.entries(colleagues)) {
+    html += `<tr><td class="p-2">${c}</td><td class="p-2">${count}</td></tr>`;
+  }
+
+  html += "</table>";
+
+  html += "<h3 class='text-lg font-bold mb-2'>Matcher</h3>";
+
+  for (const m of matches) {
+    html += `
+      <div class="border-b py-2">
+        <b>${m.home}</b> – <b>${m.away}</b><br>
+        <small>${m.date}, ${m.hall}</small>
+      </div>
+    `;
+  }
+
+  html += "</div>";
+
+  box.innerHTML = html;
+}
+</script>
+
+</body>
+</html>
