@@ -20,7 +20,7 @@
 
 <!-- FILTER CARD -->
 <div class="bg-white shadow p-4 rounded mb-6">
-  <div class="flex items-center gap-4 flex-wrap">
+  <div class="flex items-center gap-4">
     <div>
       <label class="block text-sm">Från:</label>
       <input id="dateFrom" type="date" class="border rounded px-2 py-1">
@@ -39,16 +39,16 @@
 </div>
 
 <!-- SELECTORS -->
-<div class="bg-white shadow p-4 rounded mb-6 flex items-center gap-8 flex-wrap">
+<div class="bg-white shadow p-4 rounded mb-6 flex items-center gap-8">
   <div>
-    <label class="block font-semibold">Serie:</label>
+    <label class="block">Serie:</label>
     <select id="seriesSelect" onchange="renderSeriesStats()" class="border rounded px-2 py-1 w-64">
       <option value="">– välj serie –</option>
     </select>
   </div>
 
   <div>
-    <label class="block font-semibold">Domare:</label>
+    <label class="block">Domare:</label>
     <select id="refSelect" onchange="renderRefereeStats()" class="border rounded px-2 py-1 w-64">
       <option value="">– välj domare –</option>
     </select>
@@ -56,7 +56,6 @@
 </div>
 
 <!-- OUTPUT AREAS -->
-<div id="rankingOutput" class="mb-6"></div>
 <div id="seriesOutput" class="mb-6"></div>
 <div id="refOutput"></div>
 
@@ -66,7 +65,7 @@ let allMatches = [];
 let allSeries = new Set();
 let allRefs = new Set();
 
-// ===== ROLE MAPPING =====
+// ROLE MAPPING
 function mapRole(desc) {
   if (!desc) return "Other";
   let d = desc.toLowerCase().trim();
@@ -75,16 +74,14 @@ function mapRole(desc) {
   if (d.includes("andredomare")) return "D2";
   if (d.includes("tredjedomare")) return "D3";
   if (d.includes("fjärdedomare")) return "D4";
-
   if (d.includes("ass. domare 1") || d.includes("ass.domare 1")) return "AD1";
   if (d.includes("ass. domare 2") || d.includes("ass.domare 2")) return "AD2";
-
   if (d === "domare") return "HD";
 
   return "Other";
 }
 
-// ===== FETCH ONE DAY =====
+// FETCH ONE DAY
 async function fetchDay(date) {
   const target =
     `https://www.gbgfotboll.se/api/matches-today/games/?showReferees=true&associationId=7&date=${date}`;
@@ -94,7 +91,7 @@ async function fetchDay(date) {
   return res.json();
 }
 
-// ===== LOAD INTERVAL =====
+// LOAD INTERVAL
 async function loadInterval() {
   const from = document.getElementById("dateFrom").value;
   const to = document.getElementById("dateTo").value;
@@ -113,14 +110,13 @@ async function loadInterval() {
 
   let current = new Date(from);
   const end = new Date(to);
-  const totalDays = Math.floor((end - current) / (1000*60*60*24)) + 1;
 
+  const totalDays = (end - current) / (1000*60*60*24) + 1;
   let dayCount = 0;
 
   while (current <= end) {
     const d = current.toISOString().slice(0,10);
-
-    text.textContent = `Hämtar ${d}…`;
+    text.textContent = `Hämtar ${d} …`;
 
     const data = await fetchDay(d);
     dayCount++;
@@ -141,23 +137,19 @@ async function loadInterval() {
             referees: g.referees
           });
 
-          for (const r of g.referees) {
+          for (const r of g.referees)
             allRefs.add(r.name);
-          }
         }
       }
     }
-
     current.setDate(current.getDate() + 1);
   }
 
   loading.classList.add("hidden");
   populateDropdowns();
-  renderRanking();
 }
 
-
-// ===== POPULATE DROPDOWNS =====
+// Populate dropdowns
 function populateDropdowns() {
   const s = document.getElementById("seriesSelect");
   const r = document.getElementById("refSelect");
@@ -172,81 +164,7 @@ function populateDropdowns() {
     r.innerHTML += `<option>${ref}</option>`;
 }
 
-
-// ===== RANKING LISTA =====
-function renderRanking() {
-  const box = document.getElementById("rankingOutput");
-  if (!allMatches.length) return box.innerHTML = "";
-
-  let stats = {};
-
-  for (const m of allMatches) {
-    for (const r of m.referees) {
-      const role = mapRole(r.roleDescription);
-
-      if (!stats[r.name]) {
-        stats[r.name] = { HD:0, D1:0, D2:0, AD1:0, AD2:0, D3:0, D4:0, total:0 };
-      }
-
-      stats[r.name][role]++;
-      stats[r.name].total++;
-    }
-  }
-
-  let ranking = Object.entries(stats)
-    .sort((a, b) => b[1].total - a[1].total)
-    .slice(0, 100);
-
-  let html = `
-    <div class="bg-white shadow p-4 rounded">
-      <h2 class="text-xl font-bold mb-4">🏆 Mest aktiva domare</h2>
-
-      <table class="w-full text-sm">
-        <tr class="bg-gray-200 font-semibold">
-          <th class="p-2">#</th>
-          <th class="p-2">Domare</th>
-          <th class="p-2">Totalt</th>
-          <th class="p-2">HD</th>
-          <th class="p-2">D1</th>
-          <th class="p-2">D2</th>
-          <th class="p-2">AD1</th>
-          <th class="p-2">AD2</th>
-          <th class="p-2">D3</th>
-          <th class="p-2">D4</th>
-        </tr>
-  `;
-
-  let rank = 1;
-
-  for (const [name, s] of ranking) {
-    html += `
-      <tr class="border-b hover:bg-gray-50 cursor-pointer" onclick="selectRef('${name}')">
-        <td class="p-2 font-bold">${rank++}</td>
-        <td class="p-2">${name}</td>
-        <td class="p-2 font-bold">${s.total}</td>
-        <td class="p-2">${s.HD}</td>
-        <td class="p-2">${s.D1}</td>
-        <td class="p-2">${s.D2}</td>
-        <td class="p-2">${s.AD1}</td>
-        <td class="p-2">${s.AD2}</td>
-        <td class="p-2">${s.D3}</td>
-        <td class="p-2">${s.D4}</td>
-      </tr>
-    `;
-  }
-
-  html += "</table></div>";
-  box.innerHTML = html;
-}
-
-function selectRef(name) {
-  document.getElementById("refSelect").value = name;
-  renderRefereeStats();
-  window.scrollTo({ top: 0, behavior: "smooth" });
-}
-
-
-// ===== SERIESTATISTIK =====
+// SERIES STATISTICS
 function renderSeriesStats() {
   const serie = document.getElementById("seriesSelect").value;
   const box = document.getElementById("seriesOutput");
@@ -270,9 +188,9 @@ function renderSeriesStats() {
 
   let html = `
     <div class="bg-white shadow p-4 rounded">
-      <h2 class="text-xl font-bold mb-4">📊 Statistik – ${serie}</h2>
+      <h2 class="text-xl font-bold mb-4">Statistik – ${serie}</h2>
       <table class="w-full text-sm">
-        <tr class="bg-gray-200 font-semibold">
+        <tr class="bg-gray-200">
           <th class="p-2">Domare</th><th class="p-2">HD</th><th class="p-2">D1</th>
           <th class="p-2">D2</th><th class="p-2">AD1</th><th class="p-2">AD2</th>
           <th class="p-2">D3</th><th class="p-2">D4</th><th class="p-2">Totalt</th>
@@ -297,7 +215,7 @@ function renderSeriesStats() {
 }
 
 
-// ===== DOMARSTATISTIK + KOLLEGOR =====
+// REFEREE STATS + KOLLEGOR
 function renderRefereeStats() {
   const name = document.getElementById("refSelect").value;
   const box = document.getElementById("refOutput");
@@ -325,9 +243,9 @@ function renderRefereeStats() {
 
   let html = `
     <div class="bg-white shadow p-4 rounded">
-      <h2 class="text-2xl font-bold mb-4">${name}</h2>
+      <h2 class="text-xl font-bold mb-4">${name}</h2>
 
-      <p class="mb-4 text-sm">
+      <p class="mb-4">
         HD: ${s.HD} &nbsp;
         D1: ${s.D1} &nbsp;
         D2: ${s.D2} &nbsp;
@@ -338,9 +256,9 @@ function renderRefereeStats() {
         <b>Totalt: ${s.total}</b>
       </p>
 
-      <h3 class="text-xl font-bold mt-4 mb-2">👥 Domarkollegor</h3>
+      <h3 class="text-lg font-bold mt-4 mb-2">Domarkollegor</h3>
       <table class="w-full text-sm mb-6">
-        <tr class="bg-gray-200 font-semibold">
+        <tr class="bg-gray-200">
           <th class="p-2">Kollega</th>
           <th class="p-2">Matcher ihop</th>
         </tr>
@@ -352,7 +270,7 @@ function renderRefereeStats() {
 
   html += "</table>";
 
-  html += "<h3 class='text-xl font-bold mb-2'>📅 Matcher</h3>";
+  html += "<h3 class='text-lg font-bold mb-2'>Matcher</h3>";
 
   for (const m of matches) {
     html += `
