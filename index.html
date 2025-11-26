@@ -60,13 +60,11 @@
 <div id="seriesOutput" class="mb-6"></div>
 <div id="refOutput"></div>
 
-
 <script>
 let allMatches = [];
 let allSeries = new Set();
 let allRefs = new Set();
 
-// ===== ROLE MAPPING =====
 function mapRole(desc) {
   if (!desc) return "Other";
   let d = desc.toLowerCase().trim();
@@ -84,7 +82,6 @@ function mapRole(desc) {
   return "Other";
 }
 
-// ===== FETCH ONE DAY =====
 async function fetchDay(date) {
   const target =
     `https://www.gbgfotboll.se/api/matches-today/games/?showReferees=true&associationId=7&date=${date}`;
@@ -94,7 +91,6 @@ async function fetchDay(date) {
   return res.json();
 }
 
-// ===== LOAD INTERVAL =====
 async function loadInterval() {
   const from = document.getElementById("dateFrom").value;
   const to = document.getElementById("dateTo").value;
@@ -113,18 +109,15 @@ async function loadInterval() {
 
   let current = new Date(from);
   const end = new Date(to);
-  const totalDays = Math.floor((end - current) / (1000*60*60*24)) + 1;
-
+  const totalDays = Math.floor((end - current) / (1000 * 60 * 60 * 24)) + 1;
   let dayCount = 0;
 
   while (current <= end) {
-    const d = current.toISOString().slice(0,10);
-
+    const d = current.toISOString().slice(0, 10);
     text.textContent = `Hämtar ${d}…`;
 
     const data = await fetchDay(d);
     dayCount++;
-
     progress.style.width = ((dayCount / totalDays) * 100) + "%";
 
     if (data) {
@@ -132,18 +125,19 @@ async function loadInterval() {
         allSeries.add(comp.name);
 
         for (const g of comp.games) {
+          let fullDate = g.date;
+
           allMatches.push({
             serie: comp.name,
-            date: g.dateFormatted,
+            date: fullDate.slice(0, 10),
+            time: fullDate.slice(11, 16),
             hall: g.location,
             home: g.homeTeam.name,
             away: g.awayTeam.name,
             referees: g.referees
           });
 
-          for (const r of g.referees) {
-            allRefs.add(r.name);
-          }
+          for (const r of g.referees) allRefs.add(r.name);
         }
       }
     }
@@ -156,8 +150,6 @@ async function loadInterval() {
   renderRanking();
 }
 
-
-// ===== POPULATE DROPDOWNS =====
 function populateDropdowns() {
   const s = document.getElementById("seriesSelect");
   const r = document.getElementById("refSelect");
@@ -172,47 +164,68 @@ function populateDropdowns() {
     r.innerHTML += `<option>${ref}</option>`;
 }
 
-
-// ===== RANKING LISTA =====
 function renderRanking() {
   const box = document.getElementById("rankingOutput");
-  if (!allMatches.length) return box.innerHTML = "";
+  if (!allMatches.length) return (box.innerHTML = "");
 
   let stats = {};
 
   for (const m of allMatches) {
+    const isFutsal = m.serie.toLowerCase().includes("futsal");
+
     for (const r of m.referees) {
       const role = mapRole(r.roleDescription);
 
       if (!stats[r.name]) {
-        stats[r.name] = { HD:0, D1:0, D2:0, AD1:0, AD2:0, D3:0, D4:0, total:0 };
+        stats[r.name] = {
+          total: 0,
+          HD: 0, AD1: 0, AD2: 0, D4: 0,
+          D1: 0, D2: 0, D3: 0
+        };
       }
 
-      stats[r.name][role]++;
       stats[r.name].total++;
+
+      if (!isFutsal && ["HD","AD1","AD2","D4"].includes(role))
+        stats[r.name][role]++;
+
+      if (isFutsal && ["D1","D2","D3"].includes(role))
+        stats[r.name][role]++;
     }
   }
 
   let ranking = Object.entries(stats)
-    .sort((a, b) => b[1].total - a[1].total)
-    .slice(0, 100);
+    .sort((a, b) => b[1].total - a[1].total);
 
   let html = `
-    <div class="bg-white shadow p-4 rounded">
-      <h2 class="text-xl font-bold mb-4">🏆 Mest aktiva domare</h2>
+  <div class="bg-white shadow p-4 rounded">
+    <h2 class="text-xl font-bold mb-4">🏆 Mest aktiva domare</h2>
 
-      <table class="w-full text-sm">
-        <tr class="bg-gray-200 font-semibold">
-          <th class="p-2">#</th>
-          <th class="p-2">Domare</th>
-          <th class="p-2">Totalt</th>
-          <th class="p-2">HD</th>
-          <th class="p-2">D1</th>
-          <th class="p-2">D2</th>
-          <th class="p-2">AD1</th>
-          <th class="p-2">AD2</th>
-          <th class="p-2">D3</th>
-          <th class="p-2">D4</th>
+    <div class="max-h-[500px] overflow-y-scroll border rounded">
+      <table class="w-full text-sm border-collapse">
+
+        <tr class="bg-gray-100 font-semibold sticky top-0 z-20">
+          <th class="p-2 bg-gray-100"></th>
+          <th class="p-2 bg-gray-100"></th>
+          <th class="p-2 bg-gray-100"></th>
+
+          <th class="p-2 text-center bg-lime-200" colspan="4">Fotboll</th>
+          <th class="p-2 text-center bg-cyan-200" colspan="3">Futsal</th>
+        </tr>
+
+        <tr class="bg-gray-200 font-semibold sticky top-7 z-10">
+          <th class="p-2 text-left bg-gray-200">#</th>
+          <th class="p-2 text-left bg-gray-200">Domare</th>
+          <th class="p-2 text-left bg-gray-200">Totalt</th>
+
+          <th class="p-2 text-left bg-lime-300">HD</th>
+          <th class="p-2 text-left bg-lime-300">AD1</th>
+          <th class="p-2 text-left bg-lime-300">AD2</th>
+          <th class="p-2 text-left bg-lime-300">D4</th>
+
+          <th class="p-2 text-left bg-cyan-300">D1</th>
+          <th class="p-2 text-left bg-cyan-300">D2</th>
+          <th class="p-2 text-left bg-cyan-300">D3</th>
         </tr>
   `;
 
@@ -220,24 +233,34 @@ function renderRanking() {
 
   for (const [name, s] of ranking) {
     html += `
-      <tr class="border-b hover:bg-gray-50 cursor-pointer" onclick="selectRef('${name}')">
-        <td class="p-2 font-bold">${rank++}</td>
+      <tr class="border-b">
+        <td class="p-2">${rank++}</td>
         <td class="p-2">${name}</td>
         <td class="p-2 font-bold">${s.total}</td>
-        <td class="p-2">${s.HD}</td>
-        <td class="p-2">${s.D1}</td>
-        <td class="p-2">${s.D2}</td>
-        <td class="p-2">${s.AD1}</td>
-        <td class="p-2">${s.AD2}</td>
-        <td class="p-2">${s.D3}</td>
-        <td class="p-2">${s.D4}</td>
+
+        <td class="p-2 bg-lime-100">${s.HD}</td>
+        <td class="p-2 bg-lime-100">${s.AD1}</td>
+        <td class="p-2 bg-lime-100">${s.AD2}</td>
+        <td class="p-2 bg-lime-100">${s.D4}</td>
+
+        <td class="p-2 bg-cyan-100">${s.D1}</td>
+        <td class="p-2 bg-cyan-100">${s.D2}</td>
+        <td class="p-2 bg-cyan-100">${s.D3}</td>
       </tr>
     `;
   }
 
-  html += "</table></div>";
+  html += `
+      </table>
+    </div>
+  </div>
+  `;
+
   box.innerHTML = html;
 }
+
+
+/* --- SERIE & DOMAREVY (oförändrat) --- */
 
 function selectRef(name) {
   document.getElementById("refSelect").value = name;
@@ -245,8 +268,6 @@ function selectRef(name) {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
-
-// ===== SERIESTATISTIK =====
 function renderSeriesStats() {
   const serie = document.getElementById("seriesSelect").value;
   const box = document.getElementById("seriesOutput");
@@ -261,7 +282,7 @@ function renderSeriesStats() {
       const role = mapRole(r.roleDescription);
 
       if (!stats[r.name])
-        stats[r.name] = {HD:0,D1:0,D2:0,AD1:0,AD2:0,D3:0,D4:0,total:0};
+        stats[r.name] = {HD:0,AD1:0,AD2:0,D4:0,D1:0,D2:0,D3:0,total:0};
 
       stats[r.name][role]++;
       stats[r.name].total++;
@@ -273,9 +294,15 @@ function renderSeriesStats() {
       <h2 class="text-xl font-bold mb-4">📊 Statistik – ${serie}</h2>
       <table class="w-full text-sm">
         <tr class="bg-gray-200 font-semibold">
-          <th class="p-2">Domare</th><th class="p-2">HD</th><th class="p-2">D1</th>
-          <th class="p-2">D2</th><th class="p-2">AD1</th><th class="p-2">AD2</th>
-          <th class="p-2">D3</th><th class="p-2">D4</th><th class="p-2">Totalt</th>
+          <th class="p-2 text-left">Domare</th>
+          <th class="p-2 text-left">HD</th>
+          <th class="p-2 text-left">AD1</th>
+          <th class="p-2 text-left">AD2</th>
+          <th class="p-2 text-left">D4</th>
+          <th class="p-2 text-left">D1</th>
+          <th class="p-2 text-left">D2</th>
+          <th class="p-2 text-left">D3</th>
+          <th class="p-2 text-left">Totalt</th>
         </tr>
   `;
 
@@ -283,10 +310,13 @@ function renderSeriesStats() {
     html += `
       <tr class="border-b">
         <td class="p-2">${name}</td>
-        <td class="p-2">${s.HD}</td><td class="p-2">${s.D1}</td>
-        <td class="p-2">${s.D2}</td><td class="p-2">${s.AD1}</td>
-        <td class="p-2">${s.AD2}</td><td class="p-2">${s.D3}</td>
+        <td class="p-2">${s.HD}</td>
+        <td class="p-2">${s.AD1}</td>
+        <td class="p-2">${s.AD2}</td>
         <td class="p-2">${s.D4}</td>
+        <td class="p-2">${s.D1}</td>
+        <td class="p-2">${s.D2}</td>
+        <td class="p-2">${s.D3}</td>
         <td class="p-2 font-bold">${s.total}</td>
       </tr>
     `;
@@ -296,27 +326,28 @@ function renderSeriesStats() {
   box.innerHTML = html;
 }
 
-
-// ===== DOMARSTATISTIK + KOLLEGOR =====
 function renderRefereeStats() {
   const name = document.getElementById("refSelect").value;
   const box = document.getElementById("refOutput");
   box.innerHTML = "";
   if (!name) return;
 
-  const matches = allMatches.filter(m =>
-    m.referees.some(r => r.name === name)
-  );
+  const matches = allMatches
+    .filter(m => m.referees.some(r => r.name === name))
+    .sort((a, b) => {
+      const dateA = a.date + " " + a.time;
+      const dateB = b.date + " " + b.time;
+      return dateA.localeCompare(dateB);
+    });
 
-  let s = {HD:0,D1:0,D2:0,AD1:0,AD2:0,D3:0,D4:0,total:0};
+  let s = {HD:0,AD1:0,AD2:0,D4:0,D1:0,D2:0,D3:0,total:0};
   let colleagues = {};
 
   for (const m of matches) {
     for (const r of m.referees) {
+      const role = mapRole(r.roleDescription);
       if (r.name === name) {
-        const role = mapRole(r.roleDescription);
-        s[role]++;
-        s.total++;
+        s[role]++; s.total++;
       } else {
         colleagues[r.name] = (colleagues[r.name] || 0) + 1;
       }
@@ -329,20 +360,44 @@ function renderRefereeStats() {
 
       <p class="mb-4 text-sm">
         HD: ${s.HD} &nbsp;
-        D1: ${s.D1} &nbsp;
-        D2: ${s.D2} &nbsp;
         AD1: ${s.AD1} &nbsp;
         AD2: ${s.AD2} &nbsp;
-        D3: ${s.D3} &nbsp;
         D4: ${s.D4} &nbsp;
+        D1: ${s.D1} &nbsp;
+        D2: ${s.D2} &nbsp;
+        D3: ${s.D3} &nbsp;
         <b>Totalt: ${s.total}</b>
       </p>
 
-      <h3 class="text-xl font-bold mt-4 mb-2">👥 Domarkollegor</h3>
+      <h3 class="text-xl font-bold mt-4 mb-2">📅 Matcher</h3>
+  `;
+
+  for (const m of matches) {
+    const refereeLine = m.referees
+      .map(r => {
+        const role = mapRole(r.roleDescription);
+        if (r.name === name) {
+          return `<b>${r.name} (${role})</b>`;
+        }
+        return `${r.name} (${role})`;
+      })
+      .join(", ");
+
+    html += `
+      <div class="border-b py-3 text-sm leading-tight">
+        <div>${m.date} ${m.time}, ${m.hall}</div>
+        <div>${m.serie}, ${m.home} – ${m.away}</div>
+        <div class="text-gray-800">${refereeLine}</div>
+      </div>
+    `;
+  }
+
+  html += `
+      <h3 class="text-xl font-bold mt-6 mb-2">👥 Domarkollegor – Totalt</h3>
       <table class="w-full text-sm mb-6">
         <tr class="bg-gray-200 font-semibold">
-          <th class="p-2">Kollega</th>
-          <th class="p-2">Matcher ihop</th>
+          <th class="p-2 text-left">Kollega</th>
+          <th class="p-2 text-left">Matcher ihop</th>
         </tr>
   `;
 
@@ -350,20 +405,7 @@ function renderRefereeStats() {
     html += `<tr><td class="p-2">${c}</td><td class="p-2">${count}</td></tr>`;
   }
 
-  html += "</table>";
-
-  html += "<h3 class='text-xl font-bold mb-2'>📅 Matcher</h3>";
-
-  for (const m of matches) {
-    html += `
-      <div class="border-b py-2">
-        <b>${m.home}</b> – <b>${m.away}</b><br>
-        <small>${m.date}, ${m.hall}</small>
-      </div>
-    `;
-  }
-
-  html += "</div>";
+  html += "</table></div>";
 
   box.innerHTML = html;
 }
