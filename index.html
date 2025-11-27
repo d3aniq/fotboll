@@ -2,27 +2,31 @@
 <html lang="sv">
 <head>
 <meta charset="utf-8">
-<title>DʒaniQ RefStat - Fotboll</title>
+<title>DʒaniQ RefStat – Fotboll</title>
 <script src="https://cdn.tailwindcss.com"></script>
+
+<style>
+  .fade { opacity: 0.4; }
+</style>
 </head>
 
 <body class="bg-gray-100 p-6">
 
-<h1 class="text-3xl font-bold mb-6">DʒaniQ RefStat - Fotboll</h1>
+<h1 class="text-3xl font-bold mb-6">DʒaniQ RefStat – Fotboll</h1>
 
 <!-- LOADING BAR -->
 <div id="loadingBar" class="hidden mb-4">
   <div class="w-full bg-gray-300 rounded h-4">
     <div id="loadingProgress" class="bg-blue-500 h-4 rounded w-0 transition-all"></div>
   </div>
-  <p id="loadingText" class="text-sm text-gray-600 mt-1">Hämtar data…</p>
+  <p id="loadingText" class="text-sm text-gray-600 mt-1">Förbereder…</p>
 </div>
 
 <!-- FILTER CARD -->
 <div class="bg-white shadow p-4 rounded mb-6">
   <div class="flex items-center gap-4 flex-wrap">
 
-    <!-- NEW: DISTRICT SELECTOR -->
+    <!-- DISTRICT -->
     <div>
       <label class="block text-sm font-semibold">Distrikt:</label>
       <select id="districtSelect" class="border rounded px-2 py-1 w-48">
@@ -87,52 +91,102 @@
   </div>
 </div>
 
-<!-- OUTPUT AREAS -->
+<!-- OUTPUT -->
 <div id="rankingOutput" class="mb-6"></div>
 <div id="seriesOutput" class="mb-6"></div>
 <div id="refOutput"></div>
 
 
+
 <script>
+// ===============================================
+// GLOBAL STATE
+// ===============================================
 let allMatches = [];
 let allSeries = new Set();
 let allRefs = new Set();
 
-/* ROLE MAPPER */
+
+// ===============================================
+// HELPERS
+// ===============================================
+function sleep(ms) {
+  return new Promise(res => setTimeout(res, ms));
+}
+
 function mapRole(desc) {
   if (!desc) return "Other";
   let d = desc.toLowerCase().trim();
+
   if (d.includes("förstedomare")) return "D1";
   if (d.includes("andredomare")) return "D2";
   if (d.includes("tredjedomare")) return "D3";
   if (d.includes("fjärdedomare")) return "D4";
+
   if (d.includes("ass. domare 1") || d.includes("ass.domare 1")) return "AD1";
   if (d.includes("ass. domare 2") || d.includes("ass.domare 2")) return "AD2";
+
   if (d === "domare") return "HD";
+
   return "Other";
 }
 
-/* FETCH ONE DAY FROM THE SELECTED DISTRICT */
-async function fetchDay(date) {
-  const district = document.getElementById("districtSelect").value;  // <— NEW
 
-  const api =
+// ===============================================
+// FETCH WITH RETRY (Pro version)
+// Retry: 3 gånger · 250ms paus · API-validering
+// ===============================================
+async function fetchDay(date) {
+  const district = document.getElementById("districtSelect").value;
+
+  const endpoint =
     `https://www.gbgfotboll.se/api/matches-today/games/?showReferees=true&associationId=${district}&date=${date}`;
 
-  const url = "https://corsproxy.io/?" + encodeURIComponent(api);
+  const url = "https://corsproxy.io/?" + encodeURIComponent(endpoint);
 
-  const res = await fetch(url);
-  if (!res.ok) return null;
-  return res.json();
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const res = await fetch(url, { cache: "no-cache" });
+
+      if (!res.ok) {
+        console.warn(`❗ API gav status ${res.status} (${date})`);
+        await sleep(150);
+        continue;
+      }
+
+      const data = await res.json();
+
+      // Validera att strukturen är korrekt
+      if (!data || !Array.isArray(data.competitions)) {
+        console.warn(`⚠ Tomt/trasigt svar (${date})`, data);
+        await sleep(150);
+        continue;
+      }
+
+      return data;
+
+    } catch (err) {
+      console.warn(`⚠ Fetch dag ${date} misslyckades (försök ${attempt})`);
+      await sleep(250);
+    }
+  }
+
+  console.error(`⛔ Kunde inte hämta dag: ${date}`);
+  return null;
 }
 
-/* LOAD MULTI-DAY INTERVAL */
+
+// ===============================================
+// LOAD FULL INTERVAL (Pro version)
+// Stabil, konsekvent och robust
+// ===============================================
 async function loadInterval() {
   const from = document.getElementById("dateFrom").value;
   const to = document.getElementById("dateTo").value;
 
   if (!from || !to) return alert("Välj datumintervall!");
 
+  // reset
   allMatches = [];
   allSeries.clear();
   allRefs.clear();
@@ -142,26 +196,31 @@ async function loadInterval() {
   const text = document.getElementById("loadingText");
 
   loading.classList.remove("hidden");
+  progress.style.width = "0%";
 
   let current = new Date(from);
   const end = new Date(to);
-  const totalDays = Math.floor((end - current) / 86400000) + 1;
-  let dayCount = 0;
+
+  const totalDays =
+    Math.floor((end - current) / 86400000) + 1;
+
+  let completedDays = 0;
 
   while (current <= end) {
     const d = current.toISOString().slice(0, 10);
     text.textContent = `Hämtar ${d}…`;
 
     const data = await fetchDay(d);
-    dayCount++;
-    progress.style.width = ((dayCount / totalDays) * 100) + "%";
+
+    completedDays++;
+    progress.style.width = ((completedDays / totalDays) * 100) + "%";
 
     if (data) {
       for (const comp of data.competitions) {
         allSeries.add(comp.name);
 
         for (const g of comp.games) {
-          let fullDate = g.date;
+          const fullDate = g.date;
 
           allMatches.push({
             serie: comp.name,
@@ -173,20 +232,27 @@ async function loadInterval() {
             referees: g.referees
           });
 
-          for (const r of g.referees) allRefs.add(r.name);
+          for (const r of g.referees)
+            allRefs.add(r.name);
         }
       }
     }
 
+    await sleep(250); // stabilare API
     current.setDate(current.getDate() + 1);
   }
 
   loading.classList.add("hidden");
+
   populateDropdowns();
   renderRanking();
 }
 
-/* POPULATE DROPDOWNS */
+
+
+// ===============================================
+// DROPDOWNS
+// ===============================================
 function populateDropdowns() {
   const s = document.getElementById("seriesSelect");
   const r = document.getElementById("refSelect");
@@ -194,17 +260,25 @@ function populateDropdowns() {
   s.innerHTML = '<option value="">– välj serie –</option>';
   r.innerHTML = '<option value="">– välj domare –</option>';
 
-  for (const serie of [...allSeries].sort())
-    s.innerHTML += `<option>${serie}</option>`;
+  [...allSeries].sort().forEach(serie =>
+    s.innerHTML += `<option>${serie}</option>`
+  );
 
-  for (const ref of [...allRefs].sort())
-    r.innerHTML += `<option>${ref}</option>`;
+  [...allRefs].sort().forEach(ref =>
+    r.innerHTML += `<option>${ref}</option>`
+  );
 }
 
-/* RANKING TABLE (unchanged except auto API) */
+
+
+// ===============================================
+// RANKING TABLE
+// ===============================================
 function renderRanking() {
   const box = document.getElementById("rankingOutput");
-  if (!allMatches.length) return (box.innerHTML = "");
+  box.innerHTML = "";
+
+  if (!allMatches.length) return;
 
   let stats = {};
 
@@ -232,55 +306,49 @@ function renderRanking() {
     }
   }
 
-  let ranking = Object.entries(stats)
-    .sort((a, b) => b[1].total - a[1].total);
+  const ranking = Object.entries(stats)
+    .sort((a,b) => b[1].total - a[1].total);
 
   let html = `
-  <div class="bg-white shadow p-4 rounded">
-    <h2 class="text-xl font-bold mb-4">🏆 Mest aktiva domare</h2>
+    <div class="bg-white shadow p-4 rounded">
+      <h2 class="text-xl font-bold mb-4">🏆 Mest aktiva domare</h2>
+      <div class="max-h-[500px] overflow-y-scroll border rounded">
 
-    <div class="max-h-[500px] overflow-y-scroll border rounded">
       <table class="w-full text-sm border-collapse">
 
-        <tr class="bg-gray-100 font-semibold sticky top-0 z-20">
-          <th class="p-2 bg-gray-100"></th>
-          <th class="p-2 bg-gray-100"></th>
-          <th class="p-2 bg-gray-100"></th>
-
+        <tr class="bg-gray-100 font-semibold">
+          <th class="p-2"></th>
+          <th class="p-2"></th>
+          <th class="p-2"></th>
           <th class="p-2 text-center bg-lime-200" colspan="4">Fotboll</th>
           <th class="p-2 text-center bg-cyan-200" colspan="3">Futsal</th>
         </tr>
 
-        <tr class="bg-gray-200 font-semibold sticky top-7 z-10">
-          <th class="p-2 text-left bg-gray-200">#</th>
-          <th class="p-2 text-left bg-gray-200">Domare</th>
-          <th class="p-2 text-left bg-gray-200">Totalt</th>
-
-          <th class="p-2 text-left bg-lime-300">HD</th>
-          <th class="p-2 text-left bg-lime-300">AD1</th>
-          <th class="p-2 text-left bg-lime-300">AD2</th>
-          <th class="p-2 text-left bg-lime-300">D4</th>
-
-          <th class="p-2 text-left bg-cyan-300">D1</th>
-          <th class="p-2 text-left bg-cyan-300">D2</th>
-          <th class="p-2 text-left bg-cyan-300">D3</th>
+        <tr class="bg-gray-200 font-semibold">
+          <th class="p-2 text-left">#</th>
+          <th class="p-2 text-left">Domare</th>
+          <th class="p-2 text-left">Totalt</th>
+          <th class="p-2 bg-lime-300">HD</th>
+          <th class="p-2 bg-lime-300">AD1</th>
+          <th class="p-2 bg-lime-300">AD2</th>
+          <th class="p-2 bg-lime-300">D4</th>
+          <th class="p-2 bg-cyan-300">D1</th>
+          <th class="p-2 bg-cyan-300">D2</th>
+          <th class="p-2 bg-cyan-300">D3</th>
         </tr>
   `;
 
-  let rank = 1;
-
+  let i = 1;
   for (const [name, s] of ranking) {
     html += `
       <tr class="border-b">
-        <td class="p-2">${rank++}</td>
+        <td class="p-2">${i++}</td>
         <td class="p-2">${name}</td>
         <td class="p-2 font-bold">${s.total}</td>
-
         <td class="p-2 bg-lime-100">${s.HD}</td>
         <td class="p-2 bg-lime-100">${s.AD1}</td>
         <td class="p-2 bg-lime-100">${s.AD2}</td>
         <td class="p-2 bg-lime-100">${s.D4}</td>
-
         <td class="p-2 bg-cyan-100">${s.D1}</td>
         <td class="p-2 bg-cyan-100">${s.D2}</td>
         <td class="p-2 bg-cyan-100">${s.D3}</td>
@@ -288,25 +356,19 @@ function renderRanking() {
     `;
   }
 
-  html += `
-      </table>
-    </div>
-  </div>
-  `;
-
+  html += `</table></div></div>`;
   box.innerHTML = html;
 }
 
-/* REST OF YOUR ORIGINAL CODE IS IDENTICAL… */
-function selectRef(name) {
-  document.getElementById("refSelect").value = name;
-  renderRefereeStats();
-  window.scrollTo({ top: 0, behavior: "smooth" });
-}
 
+
+// ===============================================
+// SERIES STATS
+// ===============================================
 function renderSeriesStats() {
   const serie = document.getElementById("seriesSelect").value;
   const box = document.getElementById("seriesOutput");
+
   box.innerHTML = "";
   if (!serie) return;
 
@@ -316,10 +378,8 @@ function renderSeriesStats() {
   for (const m of matches) {
     for (const r of m.referees) {
       const role = mapRole(r.roleDescription);
-
       if (!stats[r.name])
         stats[r.name] = {HD:0,AD1:0,AD2:0,D4:0,D1:0,D2:0,D3:0,total:0};
-
       stats[r.name][role]++;
       stats[r.name].total++;
     }
@@ -330,15 +390,15 @@ function renderSeriesStats() {
       <h2 class="text-xl font-bold mb-4">📊 Statistik – ${serie}</h2>
       <table class="w-full text-sm">
         <tr class="bg-gray-200 font-semibold">
-          <th class="p-2 text-left">Domare</th>
-          <th class="p-2 text-left">HD</th>
-          <th class="p-2 text-left">AD1</th>
-          <th class="p-2 text-left">AD2</th>
-          <th class="p-2 text-left">D4</th>
-          <th class="p-2 text-left">D1</th>
-          <th class="p-2 text-left">D2</th>
-          <th class="p-2 text-left">D3</th>
-          <th class="p-2 text-left">Totalt</th>
+          <th class="p-2">Domare</th>
+          <th class="p-2">HD</th>
+          <th class="p-2">AD1</th>
+          <th class="p-2">AD2</th>
+          <th class="p-2">D4</th>
+          <th class="p-2">D1</th>
+          <th class="p-2">D2</th>
+          <th class="p-2">D3</th>
+          <th class="p-2">Totalt</th>
         </tr>
   `;
 
@@ -354,8 +414,7 @@ function renderSeriesStats() {
         <td class="p-2">${s.D2}</td>
         <td class="p-2">${s.D3}</td>
         <td class="p-2 font-bold">${s.total}</td>
-      </tr>
-    `;
+      </tr>`;
   }
 
   html += "</table></div>";
@@ -363,15 +422,20 @@ function renderSeriesStats() {
 }
 
 
+
+// ===============================================
+// REFEREE VIEW
+// ===============================================
 function renderRefereeStats() {
   const name = document.getElementById("refSelect").value;
   const box = document.getElementById("refOutput");
+
   box.innerHTML = "";
   if (!name) return;
 
   const matches = allMatches
     .filter(m => m.referees.some(r => r.name === name))
-    .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+    .sort((a,b) => (a.date + a.time).localeCompare(b.date + b.time));
 
   let s = {HD:0,AD1:0,AD2:0,D4:0,D1:0,D2:0,D3:0,total:0};
   let colleagues = {};
@@ -391,6 +455,7 @@ function renderRefereeStats() {
 
   let html = `
     <div class="bg-white shadow p-4 rounded">
+
       <h2 class="text-2xl font-bold mb-4">${name}</h2>
 
       <p class="mb-4 text-sm">
@@ -408,42 +473,39 @@ function renderRefereeStats() {
   `;
 
   for (const m of matches) {
-    const refereeLine = m.referees
+    const line = m.referees
       .map(r => {
         const role = mapRole(r.roleDescription);
         return r.name === name
           ? `<b>${r.name} (${role})</b>`
           : `${r.name} (${role})`;
-      })
-      .join(", ");
+      }).join(", ");
 
     html += `
       <div class="border-b py-3 text-sm leading-tight">
         <div>${m.date} ${m.time}, ${m.hall}</div>
         <div>${m.serie}, ${m.home} – ${m.away}</div>
-        <div class="text-gray-800">${refereeLine}</div>
+        <div>${line}</div>
       </div>
     `;
   }
 
   html += `
       <h3 class="text-xl font-bold mt-6 mb-2">👥 Domarkollegor</h3>
-      <table class="w-full text-sm mb-6">
+      <table class="w-full text-sm">
         <tr class="bg-gray-200 font-semibold">
           <th class="p-2 text-left">Kollega</th>
           <th class="p-2 text-left">Matcher ihop</th>
         </tr>
   `;
 
-  for (const [c, count] of Object.entries(colleagues)) {
-    html += `<tr><td class="p-2">${c}</td><td class="p-2">${count}</td></tr>`;
+  for (const [col, count] of Object.entries(colleagues)) {
+    html += `<tr><td class="p-2">${col}</td><td class="p-2">${count}</td></tr>`;
   }
 
   html += "</table></div>";
-
   box.innerHTML = html;
 }
-
 
 </script>
 
